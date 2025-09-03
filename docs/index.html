@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>USB Relay Control - Web Serial API</title>
+  <style>
+    button { margin: 5px; padding: 10px; font-size: 16px; }
+    .channel { margin-bottom: 15px; }
+    #statusResult {
+      max-height: 160px; overflow: auto; background: #f3f3f3;
+      padding: 10px; white-space: pre-wrap; border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+  <h1>USB Relay Control - X-RL26</h1>
+  <button id="connect">Connect</button>
+
+  <!-- デバイス情報 -->
+  <div id="statusBox">
+    <h2>Device Information</h2>
+    <button id="statusBtn">?</button>
+    <pre id="statusResult"></pre>
+  </div>
+
+  <!-- A〜Zボタン -->
+  <div id="buttons">
+    <div class="channel"><h2>Channel A</h2><button data-cmd="A1">A1 (On)</button><button data-cmd="A0">A0 (Off)</button></div>
+    <div class="channel"><h2>Channel B</h2><button data-cmd="B1">B1 (On)</button><button data-cmd="B0">B0 (Off)</button></div>
+    <div class="channel"><h2>Channel C</h2><button data-cmd="C1">C1 (On)</button><button data-cmd="C0">C0 (Off)</button></div>
+    <div class="channel"><h2>Channel D</h2><button data-cmd="D1">D1 (On)</button><button data-cmd="D0">D0 (Off)</button></div>
+    <div class="channel"><h2>Channel E</h2><button data-cmd="E1">E1 (On)</button><button data-cmd="E0">E0 (Off)</button></div>
+    <div class="channel"><h2>Channel F</h2><button data-cmd="F1">F1 (On)</button><button data-cmd="F0">F0 (Off)</button></div>
+    <div class="channel"><h2>Channel G</h2><button data-cmd="G1">G1 (On)</button><button data-cmd="G0">G0 (Off)</button></div>
+    <div class="channel"><h2>Channel H</h2><button data-cmd="H1">H1 (On)</button><button data-cmd="H0">H0 (Off)</button></div>
+    <div class="channel"><h2>Channel I</h2><button data-cmd="I1">I1 (On)</button><button data-cmd="I0">I0 (Off)</button></div>
+    <div class="channel"><h2>Channel J</h2><button data-cmd="J1">J1 (On)</button><button data-cmd="J0">J0 (Off)</button></div>
+    <div class="channel"><h2>Channel K</h2><button data-cmd="K1">K1 (On)</button><button data-cmd="K0">K0 (Off)</button></div>
+    <div class="channel"><h2>Channel L</h2><button data-cmd="L1">L1 (On)</button><button data-cmd="L0">L0 (Off)</button></div>
+    <div class="channel"><h2>Channel M</h2><button data-cmd="M1">M1 (On)</button><button data-cmd="M0">M0 (Off)</button></div>
+    <div class="channel"><h2>Channel N</h2><button data-cmd="N1">N1 (On)</button><button data-cmd="N0">N0 (Off)</button></div>
+    <div class="channel"><h2>Channel O</h2><button data-cmd="O1">O1 (On)</button><button data-cmd="O0">O0 (Off)</button></div>
+    <div class="channel"><h2>Channel P</h2><button data-cmd="P1">P1 (On)</button><button data-cmd="P0">P0 (Off)</button></div>
+    <div class="channel"><h2>Channel Q</h2><button data-cmd="Q1">Q1 (On)</button><button data-cmd="Q0">Q0 (Off)</button></div>
+    <div class="channel"><h2>Channel R</h2><button data-cmd="R1">R1 (On)</button><button data-cmd="R0">R0 (Off)</button></div>
+    <div class="channel"><h2>Channel S</h2><button data-cmd="S1">S1 (On)</button><button data-cmd="S0">S0 (Off)</button></div>
+    <div class="channel"><h2>Channel T</h2><button data-cmd="T1">T1 (On)</button><button data-cmd="T0">T0 (Off)</button></div>
+    <div class="channel"><h2>Channel U</h2><button data-cmd="U1">U1 (On)</button><button data-cmd="U0">U0 (Off)</button></div>
+    <div class="channel"><h2>Channel V</h2><button data-cmd="V1">V1 (On)</button><button data-cmd="V0">V0 (Off)</button></div>
+    <div class="channel"><h2>Channel W</h2><button data-cmd="W1">W1 (On)</button><button data-cmd="W0">W0 (Off)</button></div>
+    <div class="channel"><h2>Channel X</h2><button data-cmd="X1">X1 (On)</button><button data-cmd="X0">X0 (Off)</button></div>
+    <div class="channel"><h2>Channel Y</h2><button data-cmd="Y1">Y1 (On)</button><button data-cmd="Y0">Y0 (Off)</button></div>
+    <div class="channel"><h2>Channel Z</h2><button data-cmd="Z1">Z1 (On)</button><button data-cmd="Z0">Z0 (Off)</button></div>
+  </div>
+
+  <script>
+    let port, reader;
+    let routeTo = null;     // null | 'status'
+    let idleTimer = null;   // 応答終了検出用
+
+    const connectButton = document.getElementById('connect');
+    const statusBtn     = document.getElementById('statusBtn');
+    const statusResult  = document.getElementById('statusResult');
+
+    // 初期は全ボタン無効
+    setRelayButtonsEnabled(false);
+    setStatusEnabled(false);
+
+    // 接続
+    connectButton.addEventListener('click', async () => {
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 9600 });
+
+        // テキスト受信
+        const decoder = new TextDecoderStream();
+        port.readable.pipeTo(decoder.writable);
+        reader = decoder.readable.getReader();
+        readLoop();
+
+        connectButton.disabled = true;
+        setRelayButtonsEnabled(true);
+        setStatusEnabled(true);
+      } catch (err) {
+        console.error('Error opening serial port:', err);
+      }
+    });
+
+    // ステータス確認（"?" を送信）
+    statusBtn.addEventListener('click', () => {
+      statusResult.textContent = '';  // 前回結果をクリア
+      routeTo = 'status';
+      resetIdle();
+      sendCommand('?');
+    });
+
+    // 受信ループ
+    async function readLoop() {
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+
+          if (routeTo === 'status') {
+            statusResult.textContent += value;
+            statusResult.scrollTop = statusResult.scrollHeight;
+            resetIdle();
+          }
+          // A1/B0等の応答は表示しない
+        }
+      } catch (err) {
+        console.error('Read error:', err);
+      }
+    }
+
+    // タイムアウトでステータス窓へのルーティングを解除
+    function resetIdle() {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => { routeTo = null; }, 400);
+    }
+
+    // コマンド送信（ログ表示なし）
+    async function sendCommand(cmd) {
+      if (!port) return;
+      const writer = port.writable.getWriter();
+      try {
+        await writer.write(new TextEncoder().encode(cmd));
+      } finally {
+        writer.releaseLock();
+      }
+    }
+
+    // 有効/無効切替
+    function setRelayButtonsEnabled(enabled) {
+      document.querySelectorAll('button[data-cmd]').forEach(btn => {
+        btn.disabled = !enabled;
+      });
+    }
+    function setStatusEnabled(enabled) {
+      statusBtn.disabled = !enabled;
+    }
+
+    // A〜Zボタンのクリックで送信
+    document.querySelectorAll('button[data-cmd]').forEach(button => {
+      button.addEventListener('click', () => {
+        const cmd = button.getAttribute('data-cmd');
+        sendCommand(cmd);
+      });
+    });
+  </script>
+</body>
+</html>
